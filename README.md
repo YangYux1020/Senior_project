@@ -1,2 +1,2 @@
 # Senior_project
-大學專題 - 聯邦式學習
+Senior_projects - Federal Learning
