@@ -6,6 +6,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 import os
 import csv
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 def load_and_preprocess(path, scaler=None, imputer=None, fit=False):
     
@@ -57,4 +60,19 @@ def load_and_preprocess(path, scaler=None, imputer=None, fit=False):
     # X_scaled (np.ndarray): 縮放後的特徵矩陣。
     # Y (pd.Series): 標準化的二元標籤。
     # scaler (StandardScaler): 處理過後的縮放器，供後續分區使用。
+ 
+
+
+
+def prepare_data_splits(X, Y, test_size=0.2, random_state=42, scaler=None):
+    """
+    針對交叉驗證 (CV) 設計的資料切分與縮放函式。
+    僅切分訓練集與測試集，將驗證流程交由 CV 演算法內部執行。
+    """
+    # 第一步：單次切分出訓練集與測試集
+    X_train, X_test, Y_train, Y_test = train_test_split(
+        X, Y, test_size=test_size, random_state=random_state
+    )
+    
+    return X_train, X_test, Y_train, Y_test
     
