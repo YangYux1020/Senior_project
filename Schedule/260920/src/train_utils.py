@@ -27,6 +27,7 @@ def train(model, dataloader, epochs, lr, device='cpu'):
     model.train()
     
     for epoch in range(epochs):
+        epoch_loss = 0.0
         for batch_X, batch_y in dataloader:
             # 將特徵搬移至指定硬體
             batch_X = batch_X.to(device)
@@ -43,20 +44,20 @@ def train(model, dataloader, epochs, lr, device='cpu'):
             確保預測機率與真實答案在數學維度上達到 1:1 的完美對齊。
             """
 
-            # 1. 清空上一輪的梯度
-            optimizer.zero_grad()
             
-            # 2. 前向傳播：讓模型給出預測機率 (0~1 之間)
-            outputs = model(batch_X)
+            optimizer.zero_grad() # 1. 清空上一輪的梯度
+            outputs = model(batch_X) # 2. 前向傳播：讓模型給出預測機率 (0~1 之間)  
+            loss = criterion(outputs, batch_y) # 3. 裁判計算損失 (Loss)
+            loss.backward() # 4. 反向傳播：計算微積分梯度
+            optimizer.step() # 5. 教練根據梯度更新權重
+
+            epoch_loss += loss.item()
             
-            # 3. 裁判計算損失 (Loss)
-            loss = criterion(outputs, batch_y)
+        # 每 10 個 Epoch 印出一次訓練進度
+        if (epoch + 1) % 10 == 0:
+            avg_loss = epoch_loss / len(dataloader)
+            print(f"Epoch [{epoch+1}/{epochs}], 平均 Loss: {avg_loss:.4f}")
             
-            # 4. 反向傳播：計算微積分梯度
-            loss.backward()
-            
-            # 5. 教練根據梯度更新權重
-            optimizer.step()
             
     return model
 
@@ -102,7 +103,7 @@ def evaluate(model, dataloader, device='cpu'):
         "accuracy": accuracy,
         "f1": f1,
         "roc_auc": roc_auc,
-        "confusion_matrix": cm.tolist()
+        "confusion_matrix": cm
     }
     
     return avg_loss, metrics
