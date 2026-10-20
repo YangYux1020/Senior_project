@@ -1,0 +1,10 @@
+{
+    "seed": 0,
+    "local_epochs": 5,
+    "lr": 0.01,
+    "rounds": 2,
+    "output_folder": "results/smoke_E5",
+    "python_version": "3.12.13",
+    "pytorch_version": "2.5.1+cu121",
+    "flwr_version": "1.41.0"
+}

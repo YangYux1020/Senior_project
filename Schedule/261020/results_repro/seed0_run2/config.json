@@ -1,0 +1,10 @@
+{
+    "seed": 0,
+    "local_epochs": 3,
+    "lr": 0.005,
+    "rounds": 3,
+    "output_folder": "results_repro/seed0_run2",
+    "python_version": "3.12.13",
+    "pytorch_version": "2.5.1+cu121",
+    "flwr_version": "1.41.0"
+}
