@@ -40,7 +40,7 @@ def run_sweep(stage_name, epochs_list, lr_list, seeds):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--stage", type=str, required=True, choices=["stageA", "stageB"])
+    parser.add_argument("--stage", type=str, required=True, choices=["stageA", "stageB", "final"])
     args = parser.parse_args()
 
     # 共通設定：使用 5 個固定的種子進行對照
@@ -56,3 +56,10 @@ if __name__ == "__main__":
         best_E = 2 # 經過 stageA 後，選擇 2 當作 E*
         print(f"=== 開始執行階段 B: 掃描 lr (固定 E*={best_E}) ===")
         run_sweep("stageB", epochs_list=[best_E], lr_list=[0.001, 0.003, 0.01, 0.03, 0.1], seeds=seeds_to_run)
+        
+    elif args.stage == "final":
+        best_E = 2
+        best_lr = 0.01
+        final_seeds = [10, 11, 12, 13, 14]
+        print(f"=== 開始執行最終確認階段: E*={best_E}, lr*={best_lr}, 種子 10-14 ===")
+        run_sweep("final", epochs_list=[best_E], lr_list=[best_lr], seeds=final_seeds)   
