@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestClassifier
 from src import preprocessing as pre
 
-# streamlit run app.py
+# 若要啟動則於終端輸入：streamlit run app.py
 
 # ==========================================
 # 網頁基本設定
@@ -192,6 +192,14 @@ def load_fedprox_curves():
 @st.cache_data
 def load_pers_tuning():
     path = "results/final/personalization_tuning_results.csv"
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
+
+@st.cache_data
+def load_scarcity_results():
+    path = "results/final/scarcity_results.csv"
     if not os.path.exists(path):
         return pd.DataFrame()
     return pd.read_csv(path)
@@ -742,15 +750,38 @@ elif page == "3. 兩階段超參數調優":
 
 
 # ==========================================
-# 章節 4：最終盲測效能對決 + 進階實驗 6.2 個人化微調最佳化
+# 章節 4：最終盲測效能對決 + 小醫院少樣本賦能實驗 + 個人化微調最佳化
 # ==========================================
 elif page == "4. 最終盲測效能對決":
-    st.title("4. 最終效能評估：全新種子 (Seeds 10~14) 測試集三方盲測與個人化調優")
+    st.title("4. 最終效能評估：全新種子 (Seeds 10~14) 三方盲測與小醫院少樣本賦能驗證")
 
     df_base = pd.read_csv("results/final/final_test_results.csv")
     df_pers = load_pers_tuning()
+    df_scar = load_scarcity_results()
 
-    c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([1.6, 2.2, 1.4])
+    c_ctrl0, c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([2.2, 1.3, 2.0, 1.1])
+    with c_ctrl0:
+        scenario_options = [
+            "100% 完整資料 (每院 660~1682 筆)",
+            "Asymmetric (小診所5% + 醫學中心100%)",
+            "5% 極稀缺 (每院 33~84 筆)",
+            "10% 稀缺 (每院 66~168 筆)",
+            "20% 低量 (每院 132~336 筆)",
+            "50% 中量 (每院 330~841 筆)",
+        ]
+        scenario_choice = st.selectbox(
+            "醫療院所資料規模情境",
+            options=scenario_options,
+            index=0,
+            format_func=lambda s: {
+                "100% 完整資料 (每院 660~1682 筆)": "📊 100% 完整資料基準 (每院 660~1,682 筆)",
+                "Asymmetric (小診所5% + 醫學中心100%)": "🏥 偏鄉小診所賦能情境 (Group 1~3 僅 5% + 醫學中心 100%)",
+                "5% 極稀缺 (每院 33~84 筆)": "📉 5% 極稀缺情境 (每院僅 24~84 筆)",
+                "10% 稀缺 (每院 66~168 筆)": "📉 10% 稀缺情境 (每院 49~168 筆)",
+                "20% 低量 (每院 132~336 筆)": "📉 20% 低量情境 (每院 97~336 筆)",
+                "50% 中量 (每院 330~841 筆)": "📈 50% 中量情境 (每院 243~841 筆)",
+            }[s],
+        )
     with c_ctrl1:
         metric_choice = st.selectbox(
             "選擇比較指標",
@@ -770,35 +801,39 @@ elif page == "4. 最終盲測效能對決":
             "Original (E=3, lr=0.005)",
         ]
         pers_choice = st.selectbox(
-            "個人化微調強度設定",
+            "個人化微調強度設定 (100% 情境)",
             options=pers_options,
             index=0,
+            disabled=(scenario_choice != "100% 完整資料 (每院 660~1682 筆)"),
             format_func=lambda s: {
-                "Moderate (E=2, lr=0.001)": "✨ 溫和微調 (E=2, lr=0.001) [最佳推薦：消除個人化漂移]",
+                "Moderate (E=2, lr=0.001)": "✨ 溫和微調 (E=2, lr=0.001) [最佳推薦]",
                 "Mild (E=1, lr=0.001)": "🔹 輕量微調 (E=1, lr=0.001)",
                 "Gentle (E=1, lr=0.0005)": "🌱 極輕微調 (E=1, lr=0.0005)",
-                "Original (E=3, lr=0.005)": "⚠️ 原始強烈微調 (E=3, lr=0.005) [Group 5 發生過度微調]",
+                "Original (E=3, lr=0.005)": "⚠️ 原始強烈微調 (E=3, lr=0.005)",
             }[s],
         )
     with c_ctrl3:
-        y_zoom = st.toggle("放大 Y 軸凸顯組間差異", value=True)
+        y_zoom = st.toggle("放大 Y 軸", value=True)
 
-    # 依據所選之個人化微調強度動態組裝三方比較資料表
-    df_res = df_base[df_base["model_type"].isin(["Local-only", "Global-only"])].copy()
-    if not df_pers.empty and pers_choice != "Original (E=3, lr=0.005)":
-        sub_p = df_pers[df_pers["setting"] == pers_choice].copy()
-        sub_p_mapped = pd.DataFrame({
-            "seed": sub_p["seed"].astype(int),
-            "client": sub_p["client"],
-            "model_type": "Personalized",
-            "loss": sub_p["test_loss"],
-            "accuracy": sub_p["test_acc"],
-            "f1": sub_p["test_f1"],
-            "auc": sub_p["test_auc"],
-        })
-        df_res = pd.concat([df_res, sub_p_mapped], ignore_index=True)
+    # 依據所選之醫療情境與個人化微調強度動態組裝三方比較資料表
+    if scenario_choice != "100% 完整資料 (每院 660~1682 筆)" and not df_scar.empty:
+        df_res = df_scar[df_scar["scenario"] == scenario_choice].copy()
     else:
-        df_res = df_base.copy()
+        df_res = df_base[df_base["model_type"].isin(["Local-only", "Global-only"])].copy()
+        if not df_pers.empty and pers_choice != "Original (E=3, lr=0.005)":
+            sub_p = df_pers[df_pers["setting"] == pers_choice].copy()
+            sub_p_mapped = pd.DataFrame({
+                "seed": sub_p["seed"].astype(int),
+                "client": sub_p["client"],
+                "model_type": "Personalized",
+                "loss": sub_p["test_loss"],
+                "accuracy": sub_p["test_acc"],
+                "f1": sub_p["test_f1"],
+                "auc": sub_p["test_auc"],
+            })
+            df_res = pd.concat([df_res, sub_p_mapped], ignore_index=True)
+        else:
+            df_res = df_base.copy()
 
     metric_label_map = {
         "f1": "F1-Score",
@@ -839,8 +874,9 @@ elif page == "4. 最終盲測效能對決":
 
     st.markdown("---")
 
-    tab_main, tab_tune = st.tabs([
+    tab_main, tab_scarcity, tab_tune = st.tabs([
         "🏆 三方盲測對決 (Local-only vs Global-only vs Personalized)",
+        "🏥 進階實驗：偏鄉小醫院少樣本聯邦賦能驗證 (5% ~ 100% 標註規模)",
         "🔬 進階實驗：個人化微調強度最佳化 (消除 Group 5 個人化漂移)",
     ])
 
@@ -859,7 +895,7 @@ elif page == "4. 最終盲測效能對決":
             color="model_type",
             barmode="group",
             text=summary_plot["mean"].map(lambda v: f"{v:.4f}"),
-            title=f"各分區測試集 {metric_choice.upper()} 對比 — 個人化設定：{pers_choice} (Seeds 10~14 Mean ± Std)",
+            title=f"各分區測試集 {cur_label} 對比 — 情境：{scenario_choice} (Seeds 10~14 Mean ± Std)",
             color_discrete_map={
                 "Local-only": "#f97316",
                 "Global-only": "#10b981",
@@ -867,10 +903,10 @@ elif page == "4. 最終盲測效能對決":
             },
         )
         if y_zoom and metric_choice != "loss":
-            low = max(0.74, float(summary_plot["mean"].min()) - 0.03)
+            low = max(0.65, float(summary_plot["mean"].min()) - 0.03)
             high = min(0.96, float(summary_plot["mean"].max()) + 0.02)
             fig_bar.update_yaxes(range=[low, high])
-        fig_bar.update_layout(height=420, xaxis_title="", yaxis_title=metric_choice.upper(), legend_title="模型架構")
+        fig_bar.update_layout(height=420, xaxis_title="", yaxis_title=cur_label, legend_title="模型架構")
         st.plotly_chart(fig_bar, use_container_width=True)
 
         st.markdown("---")
@@ -894,6 +930,147 @@ elif page == "4. 最終盲測效能對決":
                 .rename(columns={"model_type": "模型架構", "auc": "平均 AUC", "f1": "平均 F1", "accuracy": "平均 Acc", "loss": "平均 Loss"})
             )
             st.dataframe(t2, use_container_width=True, hide_index=True)
+
+    with tab_scarcity:
+        if not df_scar.empty:
+            st.subheader("偏鄉小診所賦能實驗：當小型醫院僅有 5% 標註病歷 (24~47 筆) 時，聯邦學習帶來壓倒性躍升")
+            asym_df = df_scar[df_scar["scenario"] == "Asymmetric (小診所5% + 醫學中心100%)"].copy()
+            clinics_df = asym_df[asym_df["client"].isin(["Group1", "Group2", "Group3"])]
+
+            c_loc = clinics_df[clinics_df["model_type"] == "Local-only"]
+            c_glb = clinics_df[clinics_df["model_type"] == "Global-only"]
+            c_per = clinics_df[clinics_df["model_type"] == "Personalized"]
+
+            sk1, sk2, sk3, sk4 = st.columns(4)
+            sk1.metric(
+                "偏鄉小診所 (Group 1~3) 樣本數",
+                "24 ~ 47 筆/院",
+                "僅 5% 標註病歷 (極度稀缺)",
+                delta_color="off",
+            )
+            sk2.metric(
+                "小診所 Local-only 平均表現",
+                f"F1: {c_loc['f1'].mean():.4f}",
+                f"AUC: {c_loc['auc'].mean():.4f} ｜ Acc: {c_loc['accuracy'].mean():.4f}",
+                delta_color="off",
+            )
+            sk3.metric(
+                "小診所 Global-only 聯邦賦能",
+                f"F1: {c_glb['f1'].mean():.4f}",
+                f"+{(c_glb['f1'].mean() - c_loc['f1'].mean())*100:.2f} pp F1 ｜ +{(c_glb['auc'].mean() - c_loc['auc'].mean())*100:.2f} pp AUC",
+            )
+            sk4.metric(
+                "小診所 Personalized 聯邦微調",
+                f"F1: {c_per['f1'].mean():.4f}",
+                f"+{(c_per['f1'].mean() - c_loc['f1'].mean())*100:.2f} pp F1 ｜ +{(c_per['accuracy'].mean() - c_loc['accuracy'].mean())*100:.2f} pp Acc",
+            )
+
+            sc_left, sc_right = st.columns(2)
+            with sc_left:
+                asym_grp = (
+                    asym_df.groupby(["client", "model_type"], sort=False)[metric_choice]
+                    .agg(mean="mean", std=lambda x: np.std(x, ddof=0))
+                    .reset_index()
+                )
+                asym_grp["client_label"] = asym_grp["client"].map({
+                    "Group1": "Group 1 (小診所 33筆)",
+                    "Group2": "Group 2 (小診所 24筆)",
+                    "Group3": "Group 3 (小診所 47筆)",
+                    "Group4": "Group 4 (醫學中心 1177筆)",
+                    "Group5": "Group 5 (醫學中心 1682筆)",
+                })
+                fig_asym = px.bar(
+                    asym_grp,
+                    x="client_label",
+                    y="mean",
+                    error_y="std",
+                    color="model_type",
+                    barmode="group",
+                    text=asym_grp["mean"].map(lambda v: f"{v:.4f}"),
+                    title=f"不對稱醫療網：小診所 (5% 病歷) vs 醫學中心 (100% 病歷) 測試集 {cur_label}",
+                    color_discrete_map={
+                        "Local-only": "#f97316",
+                        "Global-only": "#10b981",
+                        "Personalized": "#6366f1",
+                    },
+                )
+                if y_zoom and metric_choice != "loss":
+                    low_a = max(0.65, float(asym_grp["mean"].min()) - 0.03)
+                    high_a = min(0.96, float(asym_grp["mean"].max()) + 0.02)
+                    fig_asym.update_yaxes(range=[low_a, high_a])
+                fig_asym.update_layout(height=410, xaxis_title="", yaxis_title=cur_label, legend_title="模型架構")
+                st.plotly_chart(fig_asym, use_container_width=True)
+
+            with sc_right:
+                ratio_order = [
+                    "5% 極稀缺 (每院 33~84 筆)",
+                    "10% 稀缺 (每院 66~168 筆)",
+                    "20% 低量 (每院 132~336 筆)",
+                    "50% 中量 (每院 330~841 筆)",
+                    "100% 完整資料 (每院 660~1682 筆)",
+                ]
+                short_map = {
+                    "5% 極稀缺 (每院 33~84 筆)": "5% (24~84筆)",
+                    "10% 稀缺 (每院 66~168 筆)": "10% (49~168筆)",
+                    "20% 低量 (每院 132~336 筆)": "20% (97~336筆)",
+                    "50% 中量 (每院 330~841 筆)": "50% (243~841筆)",
+                    "100% 完整資料 (每院 660~1682 筆)": "100% (486~1682筆)",
+                }
+                curve_df = (
+                    df_scar[df_scar["scenario"].isin(ratio_order)]
+                    .groupby(["scenario", "model_type"], sort=False)[metric_choice]
+                    .agg(mean="mean", std=lambda x: np.std(x, ddof=0))
+                    .reset_index()
+                )
+                curve_df["scenario"] = pd.Categorical(curve_df["scenario"], categories=ratio_order, ordered=True)
+                curve_df = curve_df.sort_values("scenario")
+                curve_df["ratio_label"] = curve_df["scenario"].map(short_map)
+
+                fig_curve = px.line(
+                    curve_df,
+                    x="ratio_label",
+                    y="mean",
+                    color="model_type",
+                    markers=True,
+                    text=curve_df["mean"].map(lambda v: f"{v:.4f}"),
+                    title=f"樣本規模稀缺曲線 (5% → 100%)：單機訓練隨樣本減少急遽崩跌 vs 聯邦學習維持高檔 ({cur_label})",
+                    color_discrete_map={
+                        "Local-only": "#f97316",
+                        "Global-only": "#10b981",
+                        "Personalized": "#6366f1",
+                    },
+                )
+                fig_curve.update_traces(textposition="top center", line=dict(width=3))
+                if y_zoom and metric_choice != "loss":
+                    low_c = max(0.70, float(curve_df["mean"].min()) - 0.02)
+                    high_c = min(0.95, float(curve_df["mean"].max()) + 0.02)
+                    fig_curve.update_yaxes(range=[low_c, high_c])
+                fig_curve.update_layout(height=410, xaxis_title="各院可用標註訓練資料比例", yaxis_title=f"全區平均 {cur_label}", legend_title="模型架構")
+                st.plotly_chart(fig_curve, use_container_width=True)
+
+            # 彙整比較表
+            scar_summary = []
+            all_scenarios = ["Asymmetric (小診所5% + 醫學中心100%)"] + ratio_order
+            for sc_name in all_scenarios:
+                sub_s = df_scar[df_scar["scenario"] == sc_name]
+                if sub_s.empty:
+                    continue
+                l_s = sub_s[sub_s["model_type"] == "Local-only"]
+                g_s = sub_s[sub_s["model_type"] == "Global-only"]
+                p_s = sub_s[sub_s["model_type"] == "Personalized"]
+                scar_summary.append({
+                    "醫療資料規模情境": sc_name,
+                    "Local-only (AUC / F1 / Acc)": f"{l_s['auc'].mean():.4f} / {l_s['f1'].mean():.4f} / {l_s['accuracy'].mean():.4f}",
+                    "Global-only (AUC / F1 / Acc)": f"{g_s['auc'].mean():.4f} / {g_s['f1'].mean():.4f} / {g_s['accuracy'].mean():.4f}",
+                    "Personalized (AUC / F1 / Acc)": f"{p_s['auc'].mean():.4f} / {p_s['f1'].mean():.4f} / {p_s['accuracy'].mean():.4f}",
+                    "聯邦賦能增益 (Personalized vs Local)": (
+                        f"AUC {(p_s['auc'].mean() - l_s['auc'].mean())*100:+.2f} pp ｜ "
+                        f"F1 {(p_s['f1'].mean() - l_s['f1'].mean())*100:+.2f} pp ｜ "
+                        f"Acc {(p_s['accuracy'].mean() - l_s['accuracy'].mean())*100:+.2f} pp"
+                    ),
+                })
+            st.markdown("#### 各資料規模情境下三方模型表現與聯邦賦能增益總表 (Seeds 10~14 平均)")
+            st.dataframe(pd.DataFrame(scar_summary), use_container_width=True, hide_index=True)
 
     with tab_tune:
         if not df_pers.empty:

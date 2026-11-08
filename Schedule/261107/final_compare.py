@@ -22,7 +22,12 @@ def load_global_model_weights(model: torch.nn.Module, npz_path: str):
     return model
 
 
-def run_final_comparison(pers_epochs: int = 2, pers_lr: float = 0.001):
+def run_final_comparison(
+    pers_epochs: int = 2,
+    pers_lr: float = 0.001,
+    sample_ratio: float = 1.0,
+    asymmetric_clinics: bool = False,
+):
     final_seeds = [10, 11, 12, 13, 14]
     client_cids = ["0", "1", "2", "3", "4"]
 
@@ -39,6 +44,7 @@ def run_final_comparison(pers_epochs: int = 2, pers_lr: float = 0.001):
     print("=" * 75)
     print(f"開始執行測試集最終對比評估 (使用裝置: {device})")
     print(f"評估設定: E*={best_E}, lr*={best_lr} | 微調設定: pers_epochs={pers_epochs}, pers_lr={pers_lr}")
+    print(f"樣本比例: sample_ratio={sample_ratio}, asymmetric_clinics={asymmetric_clinics}")
     print("=" * 75)
 
     for seed in final_seeds:
@@ -54,7 +60,10 @@ def run_final_comparison(pers_epochs: int = 2, pers_lr: float = 0.001):
             client_seed = seed * 100 + idx
             set_global_seed(client_seed)
 
-            _, train_loader, val_loader, test_loader = build_client_assets(cid)
+            eff_ratio = 0.05 if (asymmetric_clinics and idx in [0, 1, 2]) else sample_ratio
+            _, train_loader, val_loader, test_loader = build_client_assets(
+                cid, sample_ratio=eff_ratio, subsample_seed=client_seed
+            )
             input_dim = next(iter(train_loader))[0].shape[1]
 
             # ---------------------------------------------------------
@@ -96,7 +105,7 @@ def run_final_comparison(pers_epochs: int = 2, pers_lr: float = 0.001):
             })
 
             # ---------------------------------------------------------
-            # 模型三：個人化微調模型 (Personalized) - 支援自訂微調強度 (建議 6.2)
+            # 模型三：個人化微調模型 (Personalized)
             # ---------------------------------------------------------
             set_global_seed(client_seed)
             if hasattr(train_loader, "generator") and train_loader.generator is not None:
@@ -147,5 +156,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pers_epochs", type=int, default=2, help="個人化微調週期數 (最佳設定 2，原始設定 3)")
     parser.add_argument("--pers_lr", type=float, default=0.001, help="個人化微調學習率 (最佳設定 0.001，原始設定 0.005)")
+    parser.add_argument("--sample_ratio", type=float, default=1.0, help="本地標註訓練集保留比例 (0.05 ~ 1.0)")
+    parser.add_argument("--asymmetric_clinics", action="store_true", help="模擬偏鄉小診所 (Group 1~3 僅 5% 樣本) 與醫學中心 (Group 4~5 100% 樣本)")
     args = parser.parse_args()
-    run_final_comparison(pers_epochs=args.pers_epochs, pers_lr=args.pers_lr)
+    run_final_comparison(
+        pers_epochs=args.pers_epochs,
+        pers_lr=args.pers_lr,
+        sample_ratio=args.sample_ratio,
+        asymmetric_clinics=args.asymmetric_clinics,
+    )
