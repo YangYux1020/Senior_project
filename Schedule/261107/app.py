@@ -592,7 +592,7 @@ elif page == "3. 兩階段超參數調優":
     tab_sa, tab_sb, tab_fp = st.tabs([
         "🔹 階段 A：本地週期掃描 (E ∈ {1, 2, 3, 5, 10})",
         "🔸 階段 B：學習率掃描 (lr ∈ {0.001 ~ 0.1})",
-        "🔴 進階實驗 6.1：FedProx 近端正則化抗漂移驗證 (μ ∈ {0 ~ 0.1})",
+        "🔴 進階測試 ：FedProx 近端正則化抗漂移驗證 (μ ∈ {0 ~ 0.1})",
     ])
 
     with tab_sa:
@@ -674,7 +674,7 @@ elif page == "3. 兩階段超參數調優":
             st.dataframe(table_b.drop(columns=["_auc_val"]), use_container_width=True, hide_index=True)
 
     with tab_fp:
-        st.subheader("進階實驗 6.1：FedProx 近端正則化抗客戶端漂移驗證 (FedAvg μ=0 vs FedProx μ>0)")
+        st.subheader("進階測試：FedProx 近端正則化抗客戶端漂移驗證 (FedAvg μ=0 vs FedProx μ>0)")
         fp_df = load_fedprox_curves()
         if not fp_df.empty:
             fp_ctrl1, fp_ctrl2 = st.columns([2, 3])
@@ -770,7 +770,7 @@ elif page == "4. 最終盲測效能對決":
             "Original (E=3, lr=0.005)",
         ]
         pers_choice = st.selectbox(
-            "個人化微調強度設定 (進階實驗 6.2)",
+            "個人化微調強度設定",
             options=pers_options,
             index=0,
             format_func=lambda s: {
@@ -841,7 +841,7 @@ elif page == "4. 最終盲測效能對決":
 
     tab_main, tab_tune = st.tabs([
         "🏆 三方盲測對決 (Local-only vs Global-only vs Personalized)",
-        "🔬 進階實驗 6.2：個人化微調強度最佳化 (消除 Group 5 個人化漂移)",
+        "🔬 進階實驗：個人化微調強度最佳化 (消除 Group 5 個人化漂移)",
     ])
 
     with tab_main:
