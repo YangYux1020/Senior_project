@@ -8,7 +8,7 @@ from sklearn.ensemble import RandomForestClassifier
 from src import preprocessing as pre
 
 """
-若要啟動則於終端輸入：streamlit run app.py
+若要啟動則於終端輸入:streamlit run app.py
 """
 
 

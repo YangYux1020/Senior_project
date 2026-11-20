@@ -1,0 +1,12 @@
+{
+    "seed": 0,
+    "local_epochs": 3,
+    "lr": 0.005,
+    "proximal_mu": 0.0,
+    "algorithm": "FedAvg",
+    "rounds": 3,
+    "output_folder": "results_repro/seed0_run2",
+    "python_version": "3.14.4",
+    "pytorch_version": "2.14.0+cu132",
+    "flwr_version": "1.44.0"
+}
