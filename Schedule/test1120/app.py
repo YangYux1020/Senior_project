@@ -98,7 +98,7 @@ def load_raw_partitions():
 @st.cache_data
 def get_base_scaler_and_medians():
     _, _, scaler = pre.load_and_preprocess(
-        "data/raw/balance_data_Group1.csv", scaler=None, fit=True
+        "data/raw/balance_data_Group2.csv", scaler=None, fit=True
     )
     raw_df = load_raw_partitions()
     healthy_medians = raw_df[raw_df["DIQ010"] == 0.0][RAW_FEATURES].median().to_dict()
@@ -186,14 +186,6 @@ def load_stage_histories(stage_name: str):
 
 
 @st.cache_data
-def load_fedprox_curves():
-    path = "results/final/fedprox_summary_curves.csv"
-    if not os.path.exists(path):
-        return pd.DataFrame()
-    return pd.read_csv(path)
-
-
-@st.cache_data
 def load_pers_tuning():
     path = "results/final/personalization_tuning_results.csv"
     if not os.path.exists(path):
@@ -231,7 +223,7 @@ def predict_with_npz(x_scaled: np.ndarray, npz_path: str) -> float:
 def get_personalized_weights_dict(pers_epochs: int = 2, pers_lr: float = 0.001):
     """載入全域模型並對各分區 (Group 1 ~ 5) 執行真實個人化微調 (Adam + BatchNorm + Dropout)"""
     from sklearn.model_selection import train_test_split
-    _, _, base_scaler = pre.load_and_preprocess("data/raw/balance_data_Group1.csv", scaler=None, fit=True)
+    _, _, base_scaler = pre.load_and_preprocess("data/raw/balance_data_Group2.csv", scaler=None, fit=True)
     train_sets = {}
     for i in range(1, 6):
         tr_full, _, _ = pre.load_and_preprocess(f"data/raw/balance_data_Group{i}.csv", scaler=base_scaler, fit=False)
@@ -245,13 +237,14 @@ def get_personalized_weights_dict(pers_epochs: int = 2, pers_lr: float = 0.001):
     for g_idx, g_name in enumerate(["Group 1", "Group 2", "Group 3", "Group 4", "Group 5"]):
         X_tr, y_tr = train_sets[g_name]
         pers_models[g_name] = {}
+        seed_idx = {0: 1, 1: 0}.get(g_idx, g_idx)
         for s in [10, 11, 12, 13, 14]:
             npz_p = f"results/final/E2_lr0.01/seed{s}/global_model.npz"
             if not os.path.exists(npz_p):
                 continue
             raw_npz = np.load(npz_p)
             d = {k: raw_npz[k].astype(np.float32).copy() for k in raw_npz.files}
-            rng = np.random.RandomState(s * 100 + g_idx)
+            rng = np.random.RandomState(s * 100 + seed_idx)
             param_keys = ["arr_0", "arr_1", "arr_2", "arr_3", "arr_7", "arr_8", "arr_9", "arr_10", "arr_14", "arr_15"]
             m_adam = {k: np.zeros_like(d[k]) for k in param_keys}
             v_adam = {k: np.zeros_like(d[k]) for k in param_keys}
@@ -359,7 +352,7 @@ st.sidebar.markdown(
     - **資料切分**：68% 訓練 / 12% 驗證 / 20% 測試
     - **模型架構**：`DiabetesNet` (MLP + BN + Dropout)
     - **最佳參數**：$E^* = 2,\\; \\text{lr}^* = 0.01$
-    - **聯邦聚合**：`FedAvg` / `FedProx` ($\\mu \\in [0, 0.1]$)
+    - **聯邦聚合**：`FedAvg`
     - **個人化微調**：$E_p = 2,\\; \\text{lr}_p = 0.001$
     """
 )
@@ -378,9 +371,9 @@ if page == "1. 研究動機與 Non-IID 數據":
     # 頂部關鍵指標卡
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("醫療時間分區", "5 Groups", "2003 ~ 2023 年")
-    k2.metric("總樣本規模", f"{len(raw_df):,} 筆", "Group 1 (972) ~ Group 5 (2,474)")
+    k2.metric("總樣本規模", f"{len(raw_df):,} 筆", "Group 1 (1,074) ~ Group 5 (3,711)")
     k3.metric("輸入特徵維度", "16 項", "13 生理指標 + 3 交互特徵")
-    k4.metric("各分區健康比例", "1 : 1", "50.0% 風險 / 50.0% 健康")
+    k4.metric("各分區健康比例", "2 : 1", "66.7% 健康 / 33.3% 高風險")
 
     st.markdown("---")
 
@@ -389,14 +382,14 @@ if page == "1. 研究動機與 Non-IID 數據":
     with c1:
         st.markdown('<div class="tag-box">① 隱私法規與跨院資料限制 (PDPA / GDPR)</div>', unsafe_allow_html=True)
     with c2:
-        st.markdown('<div class="tag-box">② 二元風險定義與 1 : 1 類別平衡設計</div>', unsafe_allow_html=True)
+        st.markdown('<div class="tag-box">② 二元風險定義 (健康：高風險)</div>', unsafe_allow_html=True)
     with c3:
-        st.markdown('<div class="tag-box">③ 防資料外洩之統一標準化 (Group 1 基準)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="tag-box">③ 防資料外洩之統一標準化 (2003–2006)</div>', unsafe_allow_html=True)
 
     st.markdown("---")
 
     tab1, tab2, tab3 = st.tabs([
-        "📊 跨分區樣本量與類別平衡",
+        "📊 跨分區樣本量與 2:1 類別分佈",
         "📈 跨分區生理特徵分佈 (Feature Drift)",
         "🔥 跨時期特徵重要度與相關性位移",
     ])
@@ -418,7 +411,7 @@ if page == "1. 研究動機與 Non-IID 數據":
                 barmode="group",
                 text="Count",
                 color_discrete_map={"健康 (0.0)": "#3b82f6", "高風險 (1.0)": "#ef4444"},
-                title="各醫療分區 (Group 1 ~ 5) 正負樣本數分佈 (樣本量高度不均 + 類別 1:1 平衡)",
+                title="各醫療分區 (Group 1 ~ 5) 正負樣本數分佈 (樣本量高度不均 + 健康:高風險 2:1 比例)",
             )
             fig_cnt.update_layout(height=400, xaxis_title="", yaxis_title="樣本數", legend_title="類別")
             st.plotly_chart(fig_cnt, use_container_width=True)
@@ -437,8 +430,10 @@ if page == "1. 研究動機與 Non-IID 數據":
                     "訓練集 (68%)": n_train,
                     "驗證集 (12%)": n_val,
                     "測試集 (20%)": n_test,
-                    "FedAvg 權重佔比": f"{n_train / 4951 * 100:.1f}%",
                 })
+            total_train_samples = sum(r["訓練集 (68%)"] for r in split_rows)
+            for r in split_rows:
+                r["FedAvg 權重佔比"] = f"{r['訓練集 (68%)'] / total_train_samples * 100:.1f}%"
             st.markdown("#### 各分區資料切分與 FedAvg 聚合權重表")
             st.dataframe(pd.DataFrame(split_rows), use_container_width=True, hide_index=True)
 
@@ -511,15 +506,15 @@ if page == "1. 研究動機與 Non-IID 數據":
 # 章節 2：聯邦學習架構與可重現性
 # ==========================================
 elif page == "2. 聯邦學習架構與可重現性":
-    st.title("2. 系統架構：聯邦式學習 (FedAvg / FedProx) 與可重現性驗證")
+    st.title("2. 系統架構：聯邦式學習 (FedAvg) 與可重現性驗證")
 
     # 訓練範式精簡對照表
     st.subheader("四種機器學習訓練範式對照")
     paradigm_df = pd.DataFrame({
-        "訓練範式": ["集中式訓練 (Centralized)", "單機獨立訓練 (Local-only)", "循序接力學習 (Sequential)", "水平聯邦學習 (FedAvg / FedProx - 本系統)"],
+        "訓練範式": ["集中式訓練 (Centralized)", "單機獨立訓練 (Local-only)", "循序接力學習 (Sequential)", "水平聯邦學習 (FedAvg - 本系統)"],
         "原始病歷位置": ["集中上傳單一伺服器", "保留於各醫院本地", "保留於各醫院本地", "保留於各醫院本地（僅傳權重）"],
-        "隱私保護性": ["❌ 隱私外洩風險", "✅ 原始資料不出院", "✅ 原始資料不出院", "✅ 原始資料不出院"],
-        "跨院知識共享": ["✅ 資料完整共享", "❌ 資料孤島", "⚠️ 遺忘早期分區", "✅ 全局加權聚合 + 近端抗漂移 + 本地微調"],
+        "隱私保護性": ["⚠️ 隱私外洩風險", "✅ 原始資料不出院", "✅ 原始資料不出院", "✅ 原始資料不出院"],
+        "跨院知識共享": ["✅ 資料完整共享", "⚠️ 資料孤島", "⚠️ 遺忘早期分區", "✅ 全局加權聚合 + 本地個人化微調"],
     })
     st.dataframe(paradigm_df, use_container_width=True, hide_index=True)
 
@@ -527,10 +522,10 @@ elif page == "2. 聯邦學習架構與可重現性":
     col_left, col_right = st.columns(2)
 
     with col_left:
-        st.subheader("FedAvg 聚合與 FedProx 近端抗漂移目標函數")
-        st.latex(r"\mathbf{w}^{t+1} = \sum_{k=1}^{5} \frac{n_k}{n} \, \mathbf{w}_k^{t+1}, \quad \min_{\mathbf{w}} \; \mathcal{L}_{\text{BCE}}(\mathbf{w}) + \frac{\mu}{2}\|\mathbf{w} - \mathbf{w}^t\|_2^2")
-        st.markdown('<div class="tag-box">1. Server 廣播全域權重 wᵗ 與動態參數 (E, lr, μ, seed)</div>', unsafe_allow_html=True)
-        st.markdown('<div class="tag-box">2. Client 重設種子 (seed + 1000·t + cid) 並計算近端正則化損失</div>', unsafe_allow_html=True)
+        st.subheader("FedAvg 全域加權聚合演算法")
+        st.latex(r"\mathbf{w}^{t+1} = \sum_{k=1}^{5} \frac{n_k}{n} \, \mathbf{w}_k^{t+1}")
+        st.markdown('<div class="tag-box">1. Server 廣播全域權重 wᵗ 與動態參數 (E, lr, seed)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="tag-box">2. Client 重設種子 (seed + 1000·t + cid) 並執行本地訓練</div>', unsafe_allow_html=True)
         st.markdown('<div class="tag-box">3. Client 回傳更新權重 wₖᵗ⁺¹、樣本數 nₖ 與客戶端 ID (cid)</div>', unsafe_allow_html=True)
         st.markdown('<div class="tag-box">4. Server 依 int(cid) 嚴格排序後按樣本數比例加權平均</div>', unsafe_allow_html=True)
 
@@ -549,7 +544,7 @@ elif page == "2. 聯邦學習架構與可重現性":
                 "Linear(16 → 64) + BatchNorm1d(64) + ReLU + Dropout(0.2)",
                 "Linear(64 → 32) + BatchNorm1d(32) + ReLU + Dropout(0.2)",
                 "Linear(32 → 1) 輸出 Logit（推論時經 Sigmoid 轉機率）",
-                "BCEWithLogitsLoss + FedProx Proximal Term + Adam (3,393 參數)",
+                "BCEWithLogitsLoss + Adam (3,393 參數)",
             ],
         })
         st.dataframe(arch_df, use_container_width=True, hide_index=True)
@@ -559,7 +554,7 @@ elif page == "2. 聯邦學習架構與可重現性":
 
     r_col1, r_col2 = st.columns(2)
     r_col1.metric("相同種子權重最大差 (Seed 0 vs 0)", "0.00e+00", "通過 (< 1e-6 標準)")
-    r_col2.metric("不同種子權重最大差 (Seed 0 vs 1)", "1.65e+00", "確認隨機性有效 (> 1e-3)")
+    r_col2.metric("不同種子權重最大差 (Seed 0 vs 1)", "2.51e+00", "確認隨機性有效 (> 1e-3)")
 
     p1 = "results_repro/seed0_run1/global_history.csv"
     p2 = "results_repro/seed0_run2/global_history.csv"
@@ -578,19 +573,18 @@ elif page == "2. 聯邦學習架構與可重現性":
 
 
 # ==========================================
-# 章節 3：兩階段超參數調優 + 進階實驗 6.1 FedProx
+# 章節 3：兩階段超參數調優
 # ==========================================
 elif page == "3. 兩階段超參數調優":
-    st.title("3. 超參數調優與抗漂移驗證：Stage A / Stage B 與 FedProx 實測")
+    st.title("3. 兩階段超參數調優：Stage A / Stage B 實測")
 
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("實驗規模", "100 場模擬", "Stage A (25) + B (25) + FedProx (50)")
-    k2.metric("Stage A 最佳本地週期", "E* = 2", "E=10 發生 Client Drift")
-    k3.metric("Stage B 最佳學習率", "lr* = 0.01", "搜尋區間正中央最佳解")
-    k4.metric("FedProx 抗漂移增益", "+0.28 pp Test AUC", "E=10 下 μ=0.05 成功抑制漂移")
+    k1, k2, k3 = st.columns(3)
+    k1.metric("實驗規模", "50 場模擬", "Stage A (25) + Stage B (25)")
+    k2.metric("Stage A 最佳本地週期", "E* = 2", "F1 / Acc / Loss 優於高週期且 6 回合快速收斂")
+    k3.metric("Stage B 最佳學習率", "lr* = 0.01", "兼顧快速收斂與低方差（lr ≥ 0.03 明顯退化）")
 
     st.markdown("---")
-    metric_col, _ = st.columns([2, 3])
+    metric_col, _ = st.columns([4, 1])
     with metric_col:
         curve_metric = st.segmented_control(
             "選擇曲線顯示指標",
@@ -601,10 +595,9 @@ elif page == "3. 兩階段超參數調優":
         if curve_metric is None:
             curve_metric = "auc"
 
-    tab_sa, tab_sb, tab_fp = st.tabs([
+    tab_sa, tab_sb = st.tabs([
         "🔹 階段 A：本地週期掃描 (E ∈ {1, 2, 3, 5, 10})",
         "🔸 階段 B：學習率掃描 (lr ∈ {0.001 ~ 0.1})",
-        "🔴 進階測試 ：FedProx 近端正則化抗漂移驗證 (μ ∈ {0 ~ 0.1})",
     ])
 
     with tab_sa:
@@ -677,80 +670,15 @@ elif page == "3. 兩階段超參數調優":
                     y="_auc_val",
                     text="最終驗證 AUC",
                     color="參數組合",
-                    title="Stage B：第 20 回合最終驗證 AUC 對比 (Interior Optimum @ lr=0.01)",
+                    title="Stage B：第 20 回合最終驗證 AUC 對比 (選定最佳學習率 lr*=0.01)",
                 )
-                fig_b2.update_yaxes(range=[0.932, 0.938], title="Final Validation AUC")
+                low_b = float(table_b["_auc_val"].min()) - 0.002
+                high_b = float(table_b["_auc_val"].max()) + 0.0015
+                fig_b2.update_yaxes(range=[low_b, high_b], title="Final Validation AUC")
                 fig_b2.update_layout(height=380, showlegend=False)
                 st.plotly_chart(fig_b2, use_container_width=True)
 
             st.dataframe(table_b.drop(columns=["_auc_val"]), use_container_width=True, hide_index=True)
-
-    with tab_fp:
-        st.subheader("進階測試：FedProx 近端正則化抗客戶端漂移驗證 (FedAvg μ=0 vs FedProx μ>0)")
-        fp_df = load_fedprox_curves()
-        if not fp_df.empty:
-            fp_ctrl1, fp_ctrl2 = st.columns([2, 3])
-            with fp_ctrl1:
-                sel_e = st.radio(
-                    "選擇檢視之本地訓練週期情境",
-                    options=[10, 2],
-                    format_func=lambda e: "E = 10（高本地週期：檢驗抑制 Client Drift 能力）" if e == 10 else "E* = 2（最佳本地週期：檢驗極限效能提升）",
-                    horizontal=True,
-                )
-            sub_fp = fp_df[fp_df["E"] == sel_e].copy()
-            col_map = {"auc": "val_auc", "f1": "val_f1", "acc": "val_acc", "loss": "val_loss"}
-            fp_col = col_map[curve_metric]
-
-            fc1, fc2 = st.columns(2)
-            with fc1:
-                fig_fp1 = go.Figure()
-                for setting, grp in sub_fp.groupby("setting", sort=False):
-                    m = grp[f"{fp_col}_mean"]
-                    fig_fp1.add_trace(go.Scatter(
-                        x=grp["round"],
-                        y=m,
-                        mode="lines+markers",
-                        name=setting,
-                        line=dict(width=3 if "0.05" in setting or "0.01" in setting or "μ=0)" in setting else 1.8),
-                    ))
-                fig_fp1.update_layout(
-                    title=f"E = {sel_e}：各近端係數 μ 之驗證集 {curve_metric.upper()} 收斂軌跡",
-                    xaxis_title="Communication Round",
-                    yaxis_title=f"Validation {curve_metric.upper()}",
-                    height=380,
-                )
-                st.plotly_chart(fig_fp1, use_container_width=True)
-
-            with fc2:
-                r20 = sub_fp[sub_fp["round"] == 20].copy()
-                fig_fp2 = px.bar(
-                    r20,
-                    x="setting",
-                    y="test_auc_mean",
-                    error_y="test_auc_std",
-                    color="setting",
-                    text=r20["test_auc_mean"].map(lambda v: f"{v:.4f}"),
-                    title=f"E = {sel_e}：第 20 回合最終測試集 ROC-AUC 對比 (5 Seeds Mean ± Std)",
-                )
-                low_y = float(r20["test_auc_mean"].min()) - 0.004
-                high_y = float(r20["test_auc_mean"].max()) + 0.003
-                fig_fp2.update_yaxes(range=[low_y, high_y], title="Test ROC-AUC")
-                fig_fp2.update_layout(height=380, xaxis_title="", showlegend=False)
-                st.plotly_chart(fig_fp2, use_container_width=True)
-
-            fp_table = []
-            for _, row in r20.iterrows():
-                fp_table.append({
-                    "演算法與近端係數": row["setting"],
-                    "本地週期 E": int(row["E"]),
-                    "μ 值": row["mu"],
-                    "最終驗證 AUC": f"{row['val_auc_mean']:.4f} ± {row['val_auc_std']:.4f}",
-                    "最終驗證 F1": f"{row['val_f1_mean']:.4f} ± {row['val_f1_std']:.4f}",
-                    "最終驗證 Loss": f"{row['val_loss_mean']:.4f} ± {row['val_loss_std']:.4f}",
-                    "盲測 Test AUC": f"{row['test_auc_mean']:.4f} ± {row['test_auc_std']:.4f}",
-                    "盲測 Test Loss": f"{row['test_loss_mean']:.4f} ± {row['test_loss_std']:.4f}",
-                })
-            st.dataframe(pd.DataFrame(fp_table), use_container_width=True, hide_index=True)
 
 
 # ==========================================
@@ -773,18 +701,19 @@ elif page == "4. 最終盲測效能對決":
             "20% 低量 (每院 132~336 筆)",
             "50% 中量 (每院 330~841 筆)",
         ]
+        scenario_display_map = {
+            "100% 完整資料 (每院 660~1682 筆)": "📊 100% 完整資料基準 (每院 730~2,522 筆)",
+            "Asymmetric (小診所5% + 醫學中心100%)": "🏥 偏鄉小診所情境 (Group 1~3 僅 5% [36~71筆] + 醫學中心 100%)",
+            "5% 極稀缺 (每院 33~84 筆)": "🏥 5% 極稀缺情境 (每院僅 36~126 筆)",
+            "10% 稀缺 (每院 66~168 筆)": "🏥 10% 稀缺情境 (每院 73~252 筆)",
+            "20% 低量 (每院 132~336 筆)": "🏥 20% 低量情境 (每院 146~504 筆)",
+            "50% 中量 (每院 330~841 筆)": "🏥 50% 中量情境 (每院 365~1,261 筆)",
+        }
         scenario_choice = st.selectbox(
             "醫療院所資料規模情境",
             options=scenario_options,
             index=0,
-            format_func=lambda s: {
-                "100% 完整資料 (每院 660~1682 筆)": "📊 100% 完整資料基準 (每院 660~1,682 筆)",
-                "Asymmetric (小診所5% + 醫學中心100%)": "🏥 偏鄉小診所賦能情境 (Group 1~3 僅 5% + 醫學中心 100%)",
-                "5% 極稀缺 (每院 33~84 筆)": "📉 5% 極稀缺情境 (每院僅 24~84 筆)",
-                "10% 稀缺 (每院 66~168 筆)": "📉 10% 稀缺情境 (每院 49~168 筆)",
-                "20% 低量 (每院 132~336 筆)": "📉 20% 低量情境 (每院 97~336 筆)",
-                "50% 中量 (每院 330~841 筆)": "📈 50% 中量情境 (每院 243~841 筆)",
-            }[s],
+            format_func=lambda s: scenario_display_map.get(s, s),
         )
     with c_ctrl1:
         metric_choice = st.selectbox(
@@ -810,10 +739,10 @@ elif page == "4. 最終盲測效能對決":
             index=0,
             disabled=(scenario_choice != "100% 完整資料 (每院 660~1682 筆)"),
             format_func=lambda s: {
-                "Moderate (E=2, lr=0.001)": "✨ 溫和微調 (E=2, lr=0.001) [最佳推薦]",
-                "Mild (E=1, lr=0.001)": "🔹 輕量微調 (E=1, lr=0.001)",
-                "Gentle (E=1, lr=0.0005)": "🌱 極輕微調 (E=1, lr=0.0005)",
-                "Original (E=3, lr=0.005)": "⚠️ 原始強烈微調 (E=3, lr=0.005)",
+                "Moderate (E=2, lr=0.001)": "推薦微調 (E=2, lr=0.001)",
+                "Mild (E=1, lr=0.001)": "輕量微調 (E=1, lr=0.001)",
+                "Gentle (E=1, lr=0.0005)": "極輕微調 (E=1, lr=0.0005)",
+                "Original (E=3, lr=0.005)": "強烈微調 (E=3, lr=0.005)",
             }[s],
         )
     with c_ctrl3:
@@ -860,8 +789,8 @@ elif page == "4. 最終盲測效能對決":
         per_delta = f"{per_mean - loc_mean:+.4f} vs Local Only"
         d_color = "inverse"
     else:
-        glb_delta = f"{(glb_mean - loc_mean) * 100:+.2f} pp vs Local Only"
-        per_delta = f"{(per_mean - loc_mean) * 100:+.2f} pp vs Local Only"
+        glb_delta = f"{(glb_mean - loc_mean) * 100:+.2f} % vs Local Only"
+        per_delta = f"{(per_mean - loc_mean) * 100:+.2f} % vs Local Only"
         d_color = "normal"
 
     # 頂部三種模型數值標籤 (Local Only、Global Only、Personalized FL)
@@ -899,7 +828,7 @@ elif page == "4. 最終盲測效能對決":
             color="model_type",
             barmode="group",
             text=summary_plot["mean"].map(lambda v: f"{v:.4f}"),
-            title=f"各分區測試集 {cur_label} 對比 — 情境：{scenario_choice} (Seeds 10~14 Mean ± Std)",
+            title=f"各分區測試集 {cur_label} 對比 — 情境：{scenario_display_map.get(scenario_choice, scenario_choice)} (Seeds 10~14 Mean ± Std)",
             color_discrete_map={
                 "Local-only": "#f97316",
                 "Global-only": "#10b981",
@@ -937,7 +866,7 @@ elif page == "4. 最終盲測效能對決":
 
     with tab_scarcity:
         if not df_scar.empty:
-            st.subheader("偏鄉小診所賦能實驗：當小型醫院僅有 5% 標註病歷 (24~47 筆) 時，聯邦學習帶來壓倒性躍升")
+            st.subheader("偏鄉小診所賦能實驗：當小型醫院僅有 5% 標註病歷 (36~71 筆) 時，聯邦學習帶來壓倒性躍升")
             asym_df = df_scar[df_scar["scenario"] == "Asymmetric (小診所5% + 醫學中心100%)"].copy()
             clinics_df = asym_df[asym_df["client"].isin(["Group1", "Group2", "Group3"])]
 
@@ -948,7 +877,7 @@ elif page == "4. 最終盲測效能對決":
             sk1, sk2, sk3, sk4 = st.columns(4)
             sk1.metric(
                 "偏鄉小診所 (Group 1~3) 樣本數",
-                "24 ~ 47 筆/院",
+                "36 ~ 71 筆/院",
                 "僅 5% 標註病歷 (極度稀缺)",
                 delta_color="off",
             )
@@ -961,12 +890,12 @@ elif page == "4. 最終盲測效能對決":
             sk3.metric(
                 "小診所 Global-only 聯邦賦能",
                 f"F1: {c_glb['f1'].mean():.4f}",
-                f"+{(c_glb['f1'].mean() - c_loc['f1'].mean())*100:.2f} pp F1 ｜ +{(c_glb['auc'].mean() - c_loc['auc'].mean())*100:.2f} pp AUC",
+                f"+{(c_glb['f1'].mean() - c_loc['f1'].mean())*100:.2f} % F1 ｜ +{(c_glb['auc'].mean() - c_loc['auc'].mean())*100:.2f} % AUC",
             )
             sk4.metric(
                 "小診所 Personalized 聯邦微調",
                 f"F1: {c_per['f1'].mean():.4f}",
-                f"+{(c_per['f1'].mean() - c_loc['f1'].mean())*100:.2f} pp F1 ｜ +{(c_per['accuracy'].mean() - c_loc['accuracy'].mean())*100:.2f} pp Acc",
+                f"+{(c_per['f1'].mean() - c_loc['f1'].mean())*100:.2f} % F1 ｜ +{(c_per['accuracy'].mean() - c_loc['accuracy'].mean())*100:.2f} % Acc",
             )
 
             sc_left, sc_right = st.columns(2)
@@ -977,11 +906,11 @@ elif page == "4. 最終盲測效能對決":
                     .reset_index()
                 )
                 asym_grp["client_label"] = asym_grp["client"].map({
-                    "Group1": "Group 1 (小診所 33筆)",
-                    "Group2": "Group 2 (小診所 24筆)",
-                    "Group3": "Group 3 (小診所 47筆)",
-                    "Group4": "Group 4 (醫學中心 1177筆)",
-                    "Group5": "Group 5 (醫學中心 1682筆)",
+                    "Group1": "Group 1 (小診所 36筆)",
+                    "Group2": "Group 2 (小診所 50筆)",
+                    "Group3": "Group 3 (小診所 71筆)",
+                    "Group4": "Group 4 (醫學中心 1766筆)",
+                    "Group5": "Group 5 (醫學中心 2522筆)",
                 })
                 fig_asym = px.bar(
                     asym_grp,
@@ -1014,11 +943,11 @@ elif page == "4. 最終盲測效能對決":
                     "100% 完整資料 (每院 660~1682 筆)",
                 ]
                 short_map = {
-                    "5% 極稀缺 (每院 33~84 筆)": "5% (24~84筆)",
-                    "10% 稀缺 (每院 66~168 筆)": "10% (49~168筆)",
-                    "20% 低量 (每院 132~336 筆)": "20% (97~336筆)",
-                    "50% 中量 (每院 330~841 筆)": "50% (243~841筆)",
-                    "100% 完整資料 (每院 660~1682 筆)": "100% (486~1682筆)",
+                    "5% 極稀缺 (每院 33~84 筆)": "5% (36~126筆)",
+                    "10% 稀缺 (每院 66~168 筆)": "10% (73~252筆)",
+                    "20% 低量 (每院 132~336 筆)": "20% (146~504筆)",
+                    "50% 中量 (每院 330~841 筆)": "50% (365~1261筆)",
+                    "100% 完整資料 (每院 660~1682 筆)": "100% (730~2522筆)",
                 }
                 curve_df = (
                     df_scar[df_scar["scenario"].isin(ratio_order)]
@@ -1063,14 +992,14 @@ elif page == "4. 最終盲測效能對決":
                 g_s = sub_s[sub_s["model_type"] == "Global-only"]
                 p_s = sub_s[sub_s["model_type"] == "Personalized"]
                 scar_summary.append({
-                    "醫療資料規模情境": sc_name,
+                    "醫療資料規模情境": scenario_display_map.get(sc_name, sc_name),
                     "Local-only (AUC / F1 / Acc)": f"{l_s['auc'].mean():.4f} / {l_s['f1'].mean():.4f} / {l_s['accuracy'].mean():.4f}",
                     "Global-only (AUC / F1 / Acc)": f"{g_s['auc'].mean():.4f} / {g_s['f1'].mean():.4f} / {g_s['accuracy'].mean():.4f}",
                     "Personalized (AUC / F1 / Acc)": f"{p_s['auc'].mean():.4f} / {p_s['f1'].mean():.4f} / {p_s['accuracy'].mean():.4f}",
                     "聯邦賦能增益 (Personalized vs Local)": (
-                        f"AUC {(p_s['auc'].mean() - l_s['auc'].mean())*100:+.2f} pp ｜ "
-                        f"F1 {(p_s['f1'].mean() - l_s['f1'].mean())*100:+.2f} pp ｜ "
-                        f"Acc {(p_s['accuracy'].mean() - l_s['accuracy'].mean())*100:+.2f} pp"
+                        f"AUC {(p_s['auc'].mean() - l_s['auc'].mean())*100:+.2f} % ｜ "
+                        f"F1 {(p_s['f1'].mean() - l_s['f1'].mean())*100:+.2f} % ｜ "
+                        f"Acc {(p_s['accuracy'].mean() - l_s['accuracy'].mean())*100:+.2f} %"
                     ),
                 })
             st.markdown("#### 各資料規模情境下三方模型表現與聯邦賦能增益總表 (Seeds 10~14 平均)")
@@ -1130,7 +1059,7 @@ elif page == "4. 最終盲測效能對決":
 # ==========================================
 elif page == "5. Live Demo 臨床即時推論":
     st.title("5. Live Demo：真實聯邦全域模型 (DiabetesNet) 即時推論")
-    st.caption("載入 `results/final/E2_lr0.01/seed10~14/global_model.npz` 真實權重與 Group 1 `StandardScaler` 進行 16 維前向傳播（僅供學術展示，非醫療診斷）")
+    st.caption("載入 `results/final/E2_lr0.01/seed10~14/global_model.npz` 真實權重與歷史基準 (Group 2, 2003–2006) `StandardScaler` 進行 16 維前向傳播（僅供學術展示，非醫療診斷）")
 
     scaler, healthy_medians = get_base_scaler_and_medians()
     raw_df = load_raw_partitions()
@@ -1347,9 +1276,9 @@ elif page == "5. Live Demo 臨床即時推論":
             y="特徵",
             orientation="h",
             color="方向",
-            text=contrib_df["風險影響 (百分點)"].map(lambda v: f"{v:+.1f} pp"),
+            text=contrib_df["風險影響 (百分點)"].map(lambda v: f"{v:+.1f} %"),
             title=f"{demo_model_mode} 個別特徵影響拆解 (相對於健康中位數)",
             color_discrete_map={"推升風險": "#ef4444", "降低風險": "#10b981"},
         )
-        fig_contrib.update_layout(height=360, xaxis_title="對預測機率之邊際影響 (百分點 pp)", yaxis_title="", showlegend=False)
+        fig_contrib.update_layout(height=360, xaxis_title="對預測機率之邊際影響 (百分點 %)", yaxis_title="", showlegend=False)
         st.plotly_chart(fig_contrib, use_container_width=True)

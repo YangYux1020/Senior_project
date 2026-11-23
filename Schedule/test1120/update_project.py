@@ -8,8 +8,8 @@
   Step 4: 執行最終全域模型訓練 (sweep.py --stage final，並同步複製 seed10 權重至 ./global_model.npz)
   Step 5: 執行三方盲測、繪製最終對比圖並產出個人化微調消融結果
           (final_compare.py, plot_final_results.py, personalization_tuning_results.csv)
-  Step 6 (選用 --include-advanced): 重新跑完 FedProx 抗漂移與少樣本稀缺進階實驗，
-          產出 fedprox_summary_curves.csv 與 scarcity_results.csv
+  Step 6 (選用 --include-advanced): 重新跑完少樣本稀缺進階實驗，
+          產出 scarcity_results.csv
 
 使用範例：
   python update_project.py                      # 執行核心更新流程 (Steps 0 ~ 5)
@@ -28,7 +28,6 @@ import sys
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import ConcatDataset, DataLoader
 
 PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
 if PROJECT_ROOT not in sys.path:
@@ -68,11 +67,6 @@ def _seed_client_loader(train_loader, client_seed: int) -> None:
     set_global_seed(client_seed)
     if hasattr(train_loader, "generator") and train_loader.generator is not None:
         train_loader.generator.manual_seed(client_seed)
-
-
-def _pop_std(values) -> float:
-    """計算母體標準差 (ddof=0)，確保與 app.py 統計口徑一致。"""
-    return float(np.std(values, ddof=0))
 
 
 def load_global_model_weights(model: torch.nn.Module, npz_path: str) -> torch.nn.Module:
@@ -118,7 +112,7 @@ def step0_backup_old_results(keep_existing: bool = False) -> None:
 def step1_preprocess_data() -> None:
     """Step 1: 讀取 data/raw/balance_data_Group1~5.csv 並輸出標準化 .parquet 檔。"""
     print("\n" + "=" * 75)
-    print("Step 1: 執行資料前處理 (以 Group1 訓練集 fit StandardScaler)")
+    print("Step 1: 執行資料前處理 (以 Group2 [2003-2006 歷史基準] 訓練集 fit StandardScaler)")
     print("=" * 75)
 
     raw_dir = os.path.join(PROJECT_ROOT, "data", "raw")
@@ -132,14 +126,16 @@ def step1_preprocess_data() -> None:
             raise FileNotFoundError(f"找不到原始資料檔: {csv_path}")
         raw_paths[group_name] = csv_path
 
-    x_train_g1, x_test_g1, base_scaler = pre.load_and_preprocess(
-        raw_paths["Group1"], scaler=None, fit=True
+    x_train_base, x_test_base, base_scaler = pre.load_and_preprocess(
+        raw_paths["Group2"], scaler=None, fit=True
     )
-    x_train_g1.to_parquet(os.path.join(processed_dir, "partition_Group1_train.parquet"))
-    x_test_g1.to_parquet(os.path.join(processed_dir, "partition_Group1_test.parquet"))
-    print(f"已完成 Group1 前處理 -> train: {len(x_train_g1)} 筆, test: {len(x_test_g1)} 筆")
+    x_train_base.to_parquet(os.path.join(processed_dir, "partition_Group2_train.parquet"))
+    x_test_base.to_parquet(os.path.join(processed_dir, "partition_Group2_test.parquet"))
+    print(f"已完成 Group2 前處理 -> train: {len(x_train_base)} 筆, test: {len(x_test_base)} 筆")
 
-    for group_name in YEAR_GROUPS[1:]:
+    for group_name in YEAR_GROUPS:
+        if group_name == "Group2":
+            continue
         x_train_scaled, x_test_scaled, _ = pre.load_and_preprocess(
             raw_paths[group_name], scaler=base_scaler, fit=False
         )
@@ -262,109 +258,6 @@ def step5_run_final_comparison_and_plots() -> None:
     _generate_personalization_tuning_csv()
 
 
-def _run_fedprox_experiments() -> None:
-    """執行 FedProx (E ∈ {2, 10}, μ ∈ {0.0, 0.001, 0.01, 0.05, 0.1}) 並彙整曲線 CSV。"""
-    print("\n--- 進階實驗 A: FedProx 近端正則化掃描與彙整 (fedprox_summary_curves.csv) ---")
-    epochs_list = [2, 10]
-    mu_list = [0.0, 0.001, 0.01, 0.05, 0.1]
-    seeds = [0, 1, 2, 3, 4]
-
-    # 預先組合 5 家醫院的獨立測試集供 Round 20 全域測試评估使用
-    test_datasets = []
-    for cid in CLIENT_CIDS:
-        _, _, _, te_loader = build_client_assets(cid)
-        test_datasets.append(te_loader.dataset)
-    combined_test_loader = DataLoader(ConcatDataset(test_datasets), batch_size=32, shuffle=False)
-    input_dim = test_datasets[0].tensors[0].shape[1]
-
-    summary_rows = []
-    for e_val in epochs_list:
-        for mu_val in mu_list:
-            setting_label = "FedAvg (μ=0)" if mu_val == 0.0 else f"FedProx (μ={mu_val})"
-            seed_histories = []
-            test_aucs, test_f1s, test_accs, test_losses = [], [], [], []
-
-            for seed in seeds:
-                exp_dir = os.path.join(
-                    PROJECT_ROOT, "results", "fedprox", f"E{e_val}_lr{BEST_LR}_mu{mu_val}", f"seed{seed}"
-                )
-                hist_path = os.path.join(exp_dir, "global_history.csv")
-                npz_path = os.path.join(exp_dir, "global_model.npz")
-
-                if not (os.path.exists(hist_path) and os.path.exists(npz_path)):
-                    run_subprocess([
-                        sys.executable, "run_experiment.py",
-                        "--seed", str(seed),
-                        "--local_epochs", str(e_val),
-                        "--lr", str(BEST_LR),
-                        "--proximal_mu", str(mu_val),
-                        "--rounds", str(NUM_ROUNDS),
-                        "--output_folder", exp_dir,
-                    ])
-
-                df_hist = pd.read_csv(hist_path)
-                df_hist["seed"] = seed
-                seed_histories.append(df_hist)
-
-                model = DiabetesNet(input_dim=input_dim).to(device)
-                model = load_global_model_weights(model, npz_path)
-                t_loss, t_metrics = evaluate(model, combined_test_loader)
-                test_losses.append(t_loss)
-                test_accs.append(t_metrics["accuracy"])
-                test_f1s.append(t_metrics["f1"])
-                test_aucs.append(t_metrics["auc"])
-
-            full_hist = pd.concat(seed_histories, ignore_index=True)
-            agg = (
-                full_hist.groupby("round")[["val_loss", "auc", "f1", "accuracy"]]
-                .agg(["mean", _pop_std])
-                .reset_index()
-            )
-            max_round = int(agg["round"].max())
-
-            for _, r in agg.iterrows():
-                rd = int(r[("round", "")])
-                row = {
-                    "E": e_val,
-                    "mu": mu_val,
-                    "setting": setting_label,
-                    "round": rd,
-                    "val_loss_mean": round(float(r[("val_loss", "mean")]), 6),
-                    "val_loss_std": round(float(r[("val_loss", "_pop_std")]), 6),
-                    "val_auc_mean": round(float(r[("auc", "mean")]), 6),
-                    "val_auc_std": round(float(r[("auc", "_pop_std")]), 6),
-                    "val_f1_mean": round(float(r[("f1", "mean")]), 6),
-                    "val_f1_std": round(float(r[("f1", "_pop_std")]), 6),
-                    "val_acc_mean": round(float(r[("accuracy", "mean")]), 6),
-                    "val_acc_std": round(float(r[("accuracy", "_pop_std")]), 6),
-                    "test_auc_mean": np.nan,
-                    "test_auc_std": np.nan,
-                    "test_f1_mean": np.nan,
-                    "test_f1_std": np.nan,
-                    "test_acc_mean": np.nan,
-                    "test_acc_std": np.nan,
-                    "test_loss_mean": np.nan,
-                    "test_loss_std": np.nan,
-                }
-                if rd == max_round:
-                    row.update({
-                        "test_auc_mean": round(float(np.mean(test_aucs)), 6),
-                        "test_auc_std": round(_pop_std(test_aucs), 6),
-                        "test_f1_mean": round(float(np.mean(test_f1s)), 6),
-                        "test_f1_std": round(_pop_std(test_f1s), 6),
-                        "test_acc_mean": round(float(np.mean(test_accs)), 6),
-                        "test_acc_std": round(_pop_std(test_accs), 6),
-                        "test_loss_mean": round(float(np.mean(test_losses)), 6),
-                        "test_loss_std": round(_pop_std(test_losses), 6),
-                    })
-                summary_rows.append(row)
-
-    out_csv = os.path.join(PROJECT_ROOT, "results", "final", "fedprox_summary_curves.csv")
-    os.makedirs(os.path.dirname(out_csv), exist_ok=True)
-    pd.DataFrame(summary_rows).to_csv(out_csv, index=False, encoding="utf-8")
-    print(f"已儲存 FedProx 彙整曲線表: {out_csv}")
-
-
 def _run_scarcity_fl_simulation_worker(
     seed: int,
     sample_ratio: float,
@@ -398,7 +291,6 @@ def _run_scarcity_fl_simulation_worker(
         local_epochs=BEST_E,
         lr=BEST_LR,
         model_path=model_path,
-        proximal_mu=0.0,
     )
     client_resources = {
         "num_cpus": 2,
@@ -438,7 +330,7 @@ def _run_scarcity_fl_simulation_worker(
 
 def _run_scarcity_experiments() -> None:
     """執行少樣本與偏鄉小診所不對稱醫療網實驗，產出 results/final/scarcity_results.csv。"""
-    print("\n--- 進階實驗 B: 少樣本稀缺與偏鄉小診所賦能實驗 (scarcity_results.csv) ---")
+    print("\n--- 進階實驗: 少樣本稀缺與偏鄉小診所賦能實驗 (scarcity_results.csv) ---")
     scenarios = [
         ("Asymmetric (小診所5% + 醫學中心100%)", "asymmetric", 1.0, True),
         ("5% 極稀缺 (每院 33~84 筆)", "ratio_0.05", 0.05, False),
@@ -524,11 +416,10 @@ def _run_scarcity_experiments() -> None:
 
 
 def step6_run_advanced_experiments() -> None:
-    """Step 6: 執行進階實驗 (FedProx 抗漂移與少樣本稀缺情境)。"""
+    """Step 6: 執行進階實驗 (少樣本稀缺賦能情境)。"""
     print("\n" + "=" * 75)
-    print("Step 6: 執行進階實驗 (FedProx 抗漂移 & 少樣本稀缺賦能)")
+    print("Step 6: 執行進階實驗 (少樣本稀缺賦能)")
     print("=" * 75)
-    _run_fedprox_experiments()
     _run_scarcity_experiments()
 
 
@@ -554,7 +445,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--include-advanced",
         action="store_true",
-        help="額外執行 Step 6 進階實驗以重新產生 fedprox_summary_curves.csv 與 scarcity_results.csv",
+        help="額外執行 Step 6 進階實驗以重新產生 scarcity_results.csv",
     )
 
     # 內部子行程專用旗標（確保 Flower + Ray 模擬於獨立行程中執行以維持 100% 可重現性）
@@ -603,7 +494,7 @@ def main() -> None:
     if args.include_advanced:
         step6_run_advanced_experiments()
     else:
-        print("\n[提示] Step 6 進階實驗未執行；若需更新 fedprox_summary_curves.csv 與 scarcity_results.csv，請加上 --include-advanced。")
+        print("\n[提示] Step 6 進階實驗未執行；若需更新 scarcity_results.csv，請加上 --include-advanced。")
 
     print("\n" + "=" * 75)
     print("專題更新完成！請執行以下指令啟動或重新整理展示系統：")

@@ -30,7 +30,7 @@ class DiabetesClient(fl.client.NumPyClient):
         self.model.load_state_dict(state_dict, strict=True)
 
     # ==========================================
-    # 區塊 3：接收指令與在地訓練 (支援 FedAvg 與 FedProx)
+    # 區塊 3：接收指令與在地訓練 (FedAvg)
     # ==========================================
     def fit(self, parameters, config):
         server_round = config["server_round"]
@@ -43,14 +43,12 @@ class DiabetesClient(fl.client.NumPyClient):
 
         epochs = config["local_epochs"]
         lr = config["lr"]
-        proximal_mu = float(config.get("proximal_mu", 0.0))
 
         self.model = train(
             self.model,
             self.train_loader,
             epochs=epochs,
             lr=lr,
-            proximal_mu=proximal_mu,
         )
 
         return self.get_parameters(config={}), len(self.train_loader.dataset), {"cid": self.cid}

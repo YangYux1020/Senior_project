@@ -186,14 +186,6 @@ def load_stage_histories(stage_name: str):
 
 
 @st.cache_data
-def load_fedprox_curves():
-    path = "results/final/fedprox_summary_curves.csv"
-    if not os.path.exists(path):
-        return pd.DataFrame()
-    return pd.read_csv(path)
-
-
-@st.cache_data
 def load_pers_tuning():
     path = "results/final/personalization_tuning_results.csv"
     if not os.path.exists(path):
@@ -359,7 +351,7 @@ st.sidebar.markdown(
     - **資料切分**：68% 訓練 / 12% 驗證 / 20% 測試
     - **模型架構**：`DiabetesNet` (MLP + BN + Dropout)
     - **最佳參數**：$E^* = 2,\\; \\text{lr}^* = 0.01$
-    - **聯邦聚合**：`FedAvg` / `FedProx` ($\\mu \\in [0, 0.1]$)
+    - **聯邦聚合**：`FedAvg` (按樣本量加權平均)
     - **個人化微調**：$E_p = 2,\\; \\text{lr}_p = 0.001$
     """
 )
@@ -511,15 +503,15 @@ if page == "1. 研究動機與 Non-IID 數據":
 # 章節 2：聯邦學習架構與可重現性
 # ==========================================
 elif page == "2. 聯邦學習架構與可重現性":
-    st.title("2. 系統架構：聯邦式學習 (FedAvg / FedProx) 與可重現性驗證")
+    st.title("2. 系統架構：聯邦式學習 (FedAvg) 與可重現性驗證")
 
     # 訓練範式精簡對照表
     st.subheader("四種機器學習訓練範式對照")
     paradigm_df = pd.DataFrame({
-        "訓練範式": ["集中式訓練 (Centralized)", "單機獨立訓練 (Local-only)", "循序接力學習 (Sequential)", "水平聯邦學習 (FedAvg / FedProx - 本系統)"],
+        "訓練範式": ["集中式訓練 (Centralized)", "單機獨立訓練 (Local-only)", "循序接力學習 (Sequential)", "水平聯邦學習 (FedAvg - 本系統)"],
         "原始病歷位置": ["集中上傳單一伺服器", "保留於各醫院本地", "保留於各醫院本地", "保留於各醫院本地（僅傳權重）"],
         "隱私保護性": ["❌ 隱私外洩風險", "✅ 原始資料不出院", "✅ 原始資料不出院", "✅ 原始資料不出院"],
-        "跨院知識共享": ["✅ 資料完整共享", "❌ 資料孤島", "⚠️ 遺忘早期分區", "✅ 全局加權聚合 + 近端抗漂移 + 本地微調"],
+        "跨院知識共享": ["✅ 資料完整共享", "❌ 資料孤島", "⚠️ 遺忘早期分區", "✅ 全局加權聚合 + 本地個人化微調"],
     })
     st.dataframe(paradigm_df, use_container_width=True, hide_index=True)
 
@@ -527,10 +519,10 @@ elif page == "2. 聯邦學習架構與可重現性":
     col_left, col_right = st.columns(2)
 
     with col_left:
-        st.subheader("FedAvg 聚合與 FedProx 近端抗漂移目標函數")
-        st.latex(r"\mathbf{w}^{t+1} = \sum_{k=1}^{5} \frac{n_k}{n} \, \mathbf{w}_k^{t+1}, \quad \min_{\mathbf{w}} \; \mathcal{L}_{\text{BCE}}(\mathbf{w}) + \frac{\mu}{2}\|\mathbf{w} - \mathbf{w}^t\|_2^2")
-        st.markdown('<div class="tag-box">1. Server 廣播全域權重 wᵗ 與動態參數 (E, lr, μ, seed)</div>', unsafe_allow_html=True)
-        st.markdown('<div class="tag-box">2. Client 重設種子 (seed + 1000·t + cid) 並計算近端正則化損失</div>', unsafe_allow_html=True)
+        st.subheader("FedAvg 加權平均聚合機制與通訊流程")
+        st.latex(r"\mathbf{w}^{t+1} = \sum_{k=1}^{5} \frac{n_k}{n} \, \mathbf{w}_k^{t+1}, \quad n = \sum_{k=1}^{5} n_k")
+        st.markdown('<div class="tag-box">1. Server 廣播全域權重 wᵗ 與動態參數 (E, lr, seed)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="tag-box">2. Client 重設確定性種子 (seed + 1000·t + cid) 並執行本地訓練</div>', unsafe_allow_html=True)
         st.markdown('<div class="tag-box">3. Client 回傳更新權重 wₖᵗ⁺¹、樣本數 nₖ 與客戶端 ID (cid)</div>', unsafe_allow_html=True)
         st.markdown('<div class="tag-box">4. Server 依 int(cid) 嚴格排序後按樣本數比例加權平均</div>', unsafe_allow_html=True)
 
@@ -549,7 +541,7 @@ elif page == "2. 聯邦學習架構與可重現性":
                 "Linear(16 → 64) + BatchNorm1d(64) + ReLU + Dropout(0.2)",
                 "Linear(64 → 32) + BatchNorm1d(32) + ReLU + Dropout(0.2)",
                 "Linear(32 → 1) 輸出 Logit（推論時經 Sigmoid 轉機率）",
-                "BCEWithLogitsLoss + FedProx Proximal Term + Adam (3,393 參數)",
+                "BCEWithLogitsLoss + Adam 優化器 (共 3,393 訓練參數)",
             ],
         })
         st.dataframe(arch_df, use_container_width=True, hide_index=True)
@@ -578,16 +570,16 @@ elif page == "2. 聯邦學習架構與可重現性":
 
 
 # ==========================================
-# 章節 3：兩階段超參數調優 + 進階實驗 6.1 FedProx
+# 章節 3：兩階段超參數調優 (Stage A & Stage B)
 # ==========================================
 elif page == "3. 兩階段超參數調優":
-    st.title("3. 超參數調優與抗漂移驗證：Stage A / Stage B 與 FedProx 實測")
+    st.title("3. 系統化兩階段超參數調優：Stage A 本地週期與 Stage B 學習率掃描")
 
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("實驗規模", "100 場模擬", "Stage A (25) + B (25) + FedProx (50)")
+    k1.metric("實驗規模", "50 場模擬", "Stage A (25 場) + Stage B (25 場)")
     k2.metric("Stage A 最佳本地週期", "E* = 2", "E=10 發生 Client Drift")
     k3.metric("Stage B 最佳學習率", "lr* = 0.01", "搜尋區間正中央最佳解")
-    k4.metric("FedProx 抗漂移增益", "+0.28 pp Test AUC", "E=10 下 μ=0.05 成功抑制漂移")
+    k4.metric("最佳驗證集 ROC-AUC", "0.9367 ± 0.0005", "95% 收斂僅需 9 回合")
 
     st.markdown("---")
     metric_col, _ = st.columns([2, 3])
@@ -601,10 +593,9 @@ elif page == "3. 兩階段超參數調優":
         if curve_metric is None:
             curve_metric = "auc"
 
-    tab_sa, tab_sb, tab_fp = st.tabs([
+    tab_sa, tab_sb = st.tabs([
         "🔹 階段 A：本地週期掃描 (E ∈ {1, 2, 3, 5, 10})",
         "🔸 階段 B：學習率掃描 (lr ∈ {0.001 ~ 0.1})",
-        "🔴 進階測試 ：FedProx 近端正則化抗漂移驗證 (μ ∈ {0 ~ 0.1})",
     ])
 
     with tab_sa:
@@ -684,73 +675,6 @@ elif page == "3. 兩階段超參數調優":
                 st.plotly_chart(fig_b2, use_container_width=True)
 
             st.dataframe(table_b.drop(columns=["_auc_val"]), use_container_width=True, hide_index=True)
-
-    with tab_fp:
-        st.subheader("進階測試：FedProx 近端正則化抗客戶端漂移驗證 (FedAvg μ=0 vs FedProx μ>0)")
-        fp_df = load_fedprox_curves()
-        if not fp_df.empty:
-            fp_ctrl1, fp_ctrl2 = st.columns([2, 3])
-            with fp_ctrl1:
-                sel_e = st.radio(
-                    "選擇檢視之本地訓練週期情境",
-                    options=[10, 2],
-                    format_func=lambda e: "E = 10（高本地週期：檢驗抑制 Client Drift 能力）" if e == 10 else "E* = 2（最佳本地週期：檢驗極限效能提升）",
-                    horizontal=True,
-                )
-            sub_fp = fp_df[fp_df["E"] == sel_e].copy()
-            col_map = {"auc": "val_auc", "f1": "val_f1", "acc": "val_acc", "loss": "val_loss"}
-            fp_col = col_map[curve_metric]
-
-            fc1, fc2 = st.columns(2)
-            with fc1:
-                fig_fp1 = go.Figure()
-                for setting, grp in sub_fp.groupby("setting", sort=False):
-                    m = grp[f"{fp_col}_mean"]
-                    fig_fp1.add_trace(go.Scatter(
-                        x=grp["round"],
-                        y=m,
-                        mode="lines+markers",
-                        name=setting,
-                        line=dict(width=3 if "0.05" in setting or "0.01" in setting or "μ=0)" in setting else 1.8),
-                    ))
-                fig_fp1.update_layout(
-                    title=f"E = {sel_e}：各近端係數 μ 之驗證集 {curve_metric.upper()} 收斂軌跡",
-                    xaxis_title="Communication Round",
-                    yaxis_title=f"Validation {curve_metric.upper()}",
-                    height=380,
-                )
-                st.plotly_chart(fig_fp1, use_container_width=True)
-
-            with fc2:
-                r20 = sub_fp[sub_fp["round"] == 20].copy()
-                fig_fp2 = px.bar(
-                    r20,
-                    x="setting",
-                    y="test_auc_mean",
-                    error_y="test_auc_std",
-                    color="setting",
-                    text=r20["test_auc_mean"].map(lambda v: f"{v:.4f}"),
-                    title=f"E = {sel_e}：第 20 回合最終測試集 ROC-AUC 對比 (5 Seeds Mean ± Std)",
-                )
-                low_y = float(r20["test_auc_mean"].min()) - 0.004
-                high_y = float(r20["test_auc_mean"].max()) + 0.003
-                fig_fp2.update_yaxes(range=[low_y, high_y], title="Test ROC-AUC")
-                fig_fp2.update_layout(height=380, xaxis_title="", showlegend=False)
-                st.plotly_chart(fig_fp2, use_container_width=True)
-
-            fp_table = []
-            for _, row in r20.iterrows():
-                fp_table.append({
-                    "演算法與近端係數": row["setting"],
-                    "本地週期 E": int(row["E"]),
-                    "μ 值": row["mu"],
-                    "最終驗證 AUC": f"{row['val_auc_mean']:.4f} ± {row['val_auc_std']:.4f}",
-                    "最終驗證 F1": f"{row['val_f1_mean']:.4f} ± {row['val_f1_std']:.4f}",
-                    "最終驗證 Loss": f"{row['val_loss_mean']:.4f} ± {row['val_loss_std']:.4f}",
-                    "盲測 Test AUC": f"{row['test_auc_mean']:.4f} ± {row['test_auc_std']:.4f}",
-                    "盲測 Test Loss": f"{row['test_loss_mean']:.4f} ± {row['test_loss_std']:.4f}",
-                })
-            st.dataframe(pd.DataFrame(fp_table), use_container_width=True, hide_index=True)
 
 
 # ==========================================

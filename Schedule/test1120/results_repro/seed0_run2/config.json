@@ -2,7 +2,6 @@
     "seed": 0,
     "local_epochs": 3,
     "lr": 0.005,
-    "proximal_mu": 0.0,
     "algorithm": "FedAvg",
     "rounds": 3,
     "output_folder": "results_repro/seed0_run2",

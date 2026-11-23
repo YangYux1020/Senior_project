@@ -29,7 +29,6 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, required=True, help="學習率")
     parser.add_argument("--rounds", type=int, required=True, help="聯邦學習總輪數")
     parser.add_argument("--output_folder", type=str, required=True, help="輸出資料夾路徑")
-    parser.add_argument("--proximal_mu", type=float, default=0.0, help="FedProx 近端正則化係數 mu (0.0 代表標準 FedAvg)")
     args = parser.parse_args()
 
     os.makedirs(args.output_folder, exist_ok=True)
@@ -46,7 +45,6 @@ if __name__ == "__main__":
         local_epochs=args.local_epochs,
         lr=args.lr,
         model_path=model_path,
-        proximal_mu=args.proximal_mu,
     )
 
     client_resources = {
@@ -70,8 +68,7 @@ if __name__ == "__main__":
         "seed": args.seed,
         "local_epochs": args.local_epochs,
         "lr": args.lr,
-        "proximal_mu": args.proximal_mu,
-        "algorithm": "FedProx" if args.proximal_mu > 0 else "FedAvg",
+        "algorithm": "FedAvg",
         "rounds": args.rounds,
         "output_folder": args.output_folder,
         "python_version": platform.python_version(),

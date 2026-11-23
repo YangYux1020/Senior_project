@@ -69,9 +69,9 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
 
 
 # ==========================================
-# 區塊 3：策略打包與發號施令 (支援 FedAvg 與 FedProx proximal_mu)
+# 區塊 3：策略打包與發號施令 (FedAvg)
 # ==========================================
-def get_strategy(seed: int, input_dim: int, local_epochs: int, lr: float, model_path: str, proximal_mu: float = 0.0):
+def get_strategy(seed: int, input_dim: int, local_epochs: int, lr: float, model_path: str):
     set_global_seed(seed)
     initial_model = DiabetesNet(input_dim)
     initial_parameters = [val.cpu().numpy() for val in initial_model.state_dict().values()]
@@ -80,7 +80,6 @@ def get_strategy(seed: int, input_dim: int, local_epochs: int, lr: float, model_
         return {
             "local_epochs": local_epochs,
             "lr": lr,
-            "proximal_mu": proximal_mu,
             "server_round": server_round,
             "seed": seed,
         }

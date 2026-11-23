@@ -7,13 +7,11 @@ from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def train(model: nn.Module, train_loader, epochs: int = 1, lr: float = 0.001, proximal_mu: float = 0.0):
+def train(model: nn.Module, train_loader, epochs: int = 1, lr: float = 0.001):
     criterion = nn.BCEWithLogitsLoss()  # loss function, 把DiabetesNet的原始分數轉換成0-1間的罹病機率
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)  # 設定優化器與學習率
 
     model = model.to(device)  # 確保模型本身被搬移到 GPU
-    # 【新增 6.1 FedProx 支援】：若 proximal_mu > 0，先複製當前回合的全域模型權重 w^t 作為近端約束基準
-    global_params = [p.detach().clone() for p in model.parameters()] if proximal_mu > 0.0 else None
 
     model.train()  # 訓練模式
     for _ in range(epochs):
@@ -26,9 +24,6 @@ def train(model: nn.Module, train_loader, epochs: int = 1, lr: float = 0.001, pr
             outputs = model(data)  # forward得到原始預測分數
 
             loss = criterion(outputs.view(-1), target.float())
-            if proximal_mu > 0.0 and global_params is not None:
-                proximal_term = sum(torch.sum((w - w_t) ** 2) for w, w_t in zip(model.parameters(), global_params))
-                loss = loss + (proximal_mu / 2.0) * proximal_term
 
             loss.backward()  # 反向傳播
             optimizer.step()  # 根據梯度更新模型權重

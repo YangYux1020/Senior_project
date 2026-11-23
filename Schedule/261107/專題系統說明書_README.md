@@ -11,7 +11,7 @@
 在醫療人工智能的臨床落地過程中，各醫療院所受限於《個人資料保護法》(PDPA)、HIPAA 與 GDPR 等隱私法規，無法將病患原始電子病歷集中上傳至單一伺服器進行訓練，形成嚴重的**「醫療資料孤島 (Data Silos)」**。尤其對於偏鄉診所或剛導入 AI 的小型醫療機構而言，由於本地標註病歷極度稀缺（往往僅有數十筆），單機訓練 (`Local-only`) 極易發生嚴重過擬合。
 
 本專題基於真實美國國家健康與營養調查 (**NHANES**) 跨世代臨床生理檢驗資料，建構一套具備 **100% 零誤差可重現性** 的水平聯邦式學習系統：
-1. **隱私保護跨院協作 (`FedAvg` & `FedProx`)**：各醫療分區僅在本地訓練 `DiabetesNet` 深度神經網路並上傳模型權重，原始病歷絕不離開醫院；並透過 `FedProx` 近端正則化項抑制跨世代資料異質性 (Non-IID) 造成的「客戶端漂移 (Client Drift)」。
+1. **隱私保護跨院協作 (`FedAvg`)**：各醫療分區僅在本地訓練 `DiabetesNet` 深度神經網路並上傳模型權重，原始病歷絕不離開醫院；並透過兩階段超參數調優找出最佳本地訓練週期 ($E^*=2$)，有效避免跨世代資料異質性 (Non-IID) 造成的「客戶端漂移 (Client Drift)」。
 2. **個人化聯邦微調 (`Personalized FL`)**：透過溫和本地微調 ($E_p=2,\; \text{lr}_p=0.001$)，兼顧小樣本分區的在地化適應與大樣本醫學中心的穩定性。
 3. **偏鄉小醫院少樣本聯邦賦能**：實測證明當小型診所 (`Group 1~3`) 僅有 5% 標註病歷（24~47 筆）時，透過聯邦學習與大型醫學中心 (`Group 4~5`) 協同訓練，可讓小診所的 **ROC-AUC 暴漲 +6.83 個百分點 (`0.8497` → `0.9180`)、Accuracy 提升 +6.88 個百分點 (`0.7730` → `0.8418`)、F1-Score 提升 +5.38 個百分點 (`0.7641` → `0.8179`)**。
 4. **臨床即時推論互動展示系統 ([`app.py`](file:///e:/專題/Senior_project/Schedule/261107/app.py))**：提供五大章節簡報級視覺化介面與真實模型權重 (`.npz`) 即時風險推論、跨院模型對比及個別生理指標邊際貢獻拆解。
@@ -66,11 +66,9 @@
 - **Hidden Layer 2**：`Linear(64 → 32)` + `BatchNorm1d(32)` + `ReLU()` + `Dropout(p=0.2)`
 - **Output Layer**：`Linear(32 → 1)` 輸出單一 Logit，訓練時搭配 `BCEWithLogitsLoss`，推論時經 `Sigmoid` 轉換為 `0% ~ 100%` 患病風險機率。
 
-### 3.2 聯邦學習聚合與抗漂移演算法 ([`src/fl/server.py`](file:///e:/專題/Senior_project/Schedule/261107/src/fl/server.py), [`src/train_utils.py`](file:///e:/專題/Senior_project/Schedule/261107/src/train_utils.py))
+### 3.2 聯邦學習聚合與個人化微調演算法 ([`src/fl/server.py`](file:///e:/專題/Senior_project/Schedule/261107/src/fl/server.py), [`src/train_utils.py`](file:///e:/專題/Senior_project/Schedule/261107/src/train_utils.py))
 - **全域聚合 (`FedAvg`)**：第 $t$ 回合伺服器收集 5 家醫院權重後，依本地訓練樣本數 $n_k$ 加權平均：
   $$\mathbf{w}^{t+1} = \sum_{k=1}^{5} \frac{n_k}{n} \mathbf{w}_k^{t+1}$$
-- **近端正則化 (`FedProx`)**：為抑制客戶端在高本地週期下偏離全域方向，本地損失函數加入近端懲罰項：
-  $$\min_{\mathbf{w}} \; \mathcal{L}_{\text{BCE}}(\mathbf{w}) + \frac{\mu}{2} \|\mathbf{w} - \mathbf{w}^t\|_2^2$$
 - **個人化微調 (`Personalized FL`)**：全域模型完成 20 回合聚合後，各醫院在本地訓練集以較小學習率 ($\text{lr}_p = 0.001$) 與週期 ($E_p = 2$) 微調，兼顧全域知識與本地世代特性。
 
 ---
@@ -80,7 +78,7 @@
 ```text
 261107/
 ├── app.py                        # Streamlit 互動式展示系統主程式（5 大展示章節 + 即時臨床推論）
-├── run_experiment.py             # 單場聯邦學習模擬執行腳本（支援命令列設定 E, lr, mu, seed, rounds）
+├── run_experiment.py             # 單場聯邦學習模擬執行腳本（支援命令列設定 E, lr, seed, rounds）
 ├── check_repro.py                # 零誤差可重現性自動驗證腳本（比對同種子與異種子之權重與指標差異）
 ├── sweep.py                      # 兩階段超參數調優批次執行腳本（Stage A 掃描 E、Stage B 掃描 lr）
 ├── final_compare.py              # 最終三方盲測腳本（支援完整資料、少樣本縮減抽樣與不對稱小診所情境）
@@ -88,20 +86,19 @@
 ├── src/
 │   ├── preprocessing.py          # 資料清理、二元標籤轉換、3 項衍生特徵計算與防洩漏 StandardScaler
 │   ├── models.py                 # DiabetesNet 神經網路結構定義 (PyTorch)
-│   ├── train_utils.py            # 本地訓練迴圈 (支援 FedProx μ 近端項) 與多指標評估 (AUC, F1, Acc, Loss)
+│   ├── train_utils.py            # 本地訓練迴圈與多指標評估 (AUC, F1, Acc, Loss)
 │   └── fl/
 │       ├── data.py               # 各分區 DataLoader 建構與少樣本分層抽樣 (sample_ratio)
 │       ├── client.py             # Flower 聯邦客戶端 (動態接收伺服器 config、跨回合確定性種子重設)
-│       └── server.py             # ReproFedAvg 伺服器策略 (依 int(cid) 確定性排序加權聚合、全域驗證)
+│       └── server.py             # SaveModelStrategy 伺服器策略 (依 int(cid) 確定性排序加權聚合、全域驗證)
 ├── data/raw/                     # NHANES 五大醫療時間分區原始資料集 (balance_data_Group1~5.csv)
 └── results/
     ├── stageA/                   # 階段 A 本地訓練週期掃描結果 (E ∈ {1, 2, 3, 5, 10}, Seeds 0~4)
     ├── stageB/                   # 階段 B 學習率掃描結果 (lr ∈ {0.001, 0.003, 0.01, 0.03, 0.1}, Seeds 0~4)
     └── final/                    # 最終盲測成果 (Seeds 10~14)
         ├── final_test_results.csv            # 100% 完整資料三方盲測結果
-        ├── fedprox_summary_curves.csv        # 進階實驗 6.1：FedProx 抗漂移完整軌跡
-        ├── personalization_tuning_results.csv# 進階實驗 6.2：個人化微調強度消融結果
-        ├── scarcity_results.csv              # 進階實驗 6.3：偏鄉小醫院少樣本聯邦賦能結果
+        ├── personalization_tuning_results.csv# 進階實驗：個人化微調強度消融結果
+        ├── scarcity_results.csv              # 進階實驗：偏鄉小醫院少樣本聯邦賦能結果
         └── E2_lr0.01/seed10~14/              # 最終聯邦全域模型訓練權重 (global_model.npz)
 ```
 
@@ -118,7 +115,7 @@ streamlit run app.py
 ### 5.2 重現各項核心實驗之命令列指令
 1. **執行單場聯邦學習訓練**：
    ```powershell
-   python run_experiment.py --seed 0 --rounds 20 --local_epochs 2 --lr 0.01 --mu 0.0 --out_dir results/test_run
+   python run_experiment.py --seed 0 --rounds 20 --local_epochs 2 --lr 0.01 --output_folder results/test_run
    ```
 2. **執行 100% 零誤差可重現性驗證**：
    ```powershell
@@ -151,12 +148,11 @@ streamlit run app.py
    - **分頁 ③（跨時期特徵重要度與相關性位移）**：比較早期 (`Group 1`) 與近期 (`Group 5`) 的隨機森林特徵重要度長條圖及相關係數熱力圖。
 2. **章節 2：`2. 聯邦學習架構與可重現性`**
    - 對照四種機器學習訓練範式（集中式、單機、循序、聯邦學習）。
-   - 展示 `FedAvg` / `FedProx` 數學公式、`DiabetesNet` 各層規格表，以及 `check_repro.py` 實測零誤差數據表（同種子誤差 `0.00e+00`）。
+   - 展示 `FedAvg` 加權平均數學公式、`DiabetesNet` 各層規格表，以及 `check_repro.py` 實測零誤差數據表（同種子誤差 `0.00e+00`）。
 3. **章節 3：`3. 兩階段超參數調優`**
    - 可切換檢視 `Validation AUC`、`F1`、`Accuracy`、`Loss` 四種指標曲線。
    - **分頁 ① (Stage A)**：展示 $E \in \{1,2,3,5,10\}$ 收斂曲線，證明 $E^*=2$ 最佳、$E=10$ 發生 Client Drift。
    - **分頁 ② (Stage B)**：展示 $\text{lr} \in \{0.001 \sim 0.1\}$ 收斂曲線，證明 $\text{lr}^*=0.01$ 為搜尋區間正中央最佳解。
-   - **分頁 ③ (FedProx 抗漂移驗證)**：可切換 $E=10$ 與 $E^*=2$，展示 $\mu=0.05$ 成功抑制高週期客戶端漂移。
 4. **章節 4：`4. 最終盲測效能對決`**
    - **頂部四大控制項**：可自由切換 **「醫療院所資料規模情境」**（`100% 完整資料`、`偏鄉小診所賦能情境`、`5% ~ 50% 稀缺情境`）、**「比較指標」**、**「個人化微調強度」** 與 **「放大 Y 軸」**。
    - **分頁 ①（三方盲測對決）**：顯示各院 `Local-only` vs `Global-only` vs `Personalized` 分組長條圖與彙整表。
@@ -174,6 +170,5 @@ streamlit run app.py
 | 實驗項目 | 關鍵發現與最佳數據 (Seeds 10~14 獨立測試集盲測) |
 | :--- | :--- |
 | **最佳聯邦超參數 (Stage A & B)** | 本地週期 **$E^* = 2$**、學習率 **$\text{lr}^* = 0.01$**（驗證集 AUC 達 **`0.9367 ± 0.0005`**，95% 收斂僅需 9 回合） |
-| **FedProx 抗漂移實驗 (Plan 6.1)** | 在 $E=10$ 高漂移下，$\mu=0.05$ 將盲測 AUC 提升 **`+0.28 pp`**、Loss 降至 `0.3547`；在 $E^*=2$ 下，$\mu=0.01$ 盲測 AUC 達 **`0.9261`** |
-| **個人化微調最佳化 (Plan 6.2)** | 溫和微調 (**$E_p=2,\; \text{lr}_p=0.001$**) 完全消除 `Group 5` 退化，全區平均 Test AUC 達 **`0.9267`**、F1 達 **`0.8477`**、Acc 達 **`0.8575`** |
-| **偏鄉小診所少樣本賦能 (Plan 6.3)** | 當小診所 (`Group 1~3`) 僅有 5% 病歷 (24~47 筆) 時，`Personalized FL` 相較 `Local-only`：**AUC +6.83 pp (`0.9180`)、Acc +6.88 pp (`0.8418`)、F1 +5.38 pp (`0.8179`)、Loss 降低 57% (`0.3715`)** |
+| **個人化微調最佳化** | 溫和微調 (**$E_p=2,\; \text{lr}_p=0.001$**) 完全消除 `Group 5` 退化，全區平均 Test AUC 達 **`0.9267`**、F1 達 **`0.8477`**、Acc 達 **`0.8575`** |
+| **偏鄉小診所少樣本賦能** | 當小診所 (`Group 1~3`) 僅有 5% 病歷 (24~47 筆) 時，`Personalized FL` 相較 `Local-only`：**AUC +6.83 pp (`0.9180`)、Acc +6.88 pp (`0.8418`)、F1 +5.38 pp (`0.8179`)、Loss 降低 57% (`0.3715`)** |

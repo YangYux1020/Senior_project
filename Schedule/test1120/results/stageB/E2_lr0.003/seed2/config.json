@@ -2,7 +2,6 @@
     "seed": 2,
     "local_epochs": 2,
     "lr": 0.003,
-    "proximal_mu": 0.0,
     "algorithm": "FedAvg",
     "rounds": 20,
     "output_folder": "results/stageB/E2_lr0.003/seed2",
