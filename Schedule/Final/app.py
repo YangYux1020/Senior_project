@@ -828,7 +828,7 @@ elif page == "4. 最終盲測效能對決":
             color="model_type",
             barmode="group",
             text=summary_plot["mean"].map(lambda v: f"{v:.4f}"),
-            title=f"各分區測試集 {cur_label} 對比 — 情境：{scenario_display_map.get(scenario_choice, scenario_choice)} (Seeds 10~14 Mean ± Std)",
+            title=f"各分區測試集 {cur_label} 對比 — 情境：{scenario_display_map.get(scenario_choice, scenario_choice)}",
             color_discrete_map={
                 "Local-only": "#f97316",
                 "Global-only": "#10b981",
@@ -1023,7 +1023,7 @@ elif page == "4. 最終盲測效能對決":
                 color="setting",
                 barmode="group",
                 text=tune_grp["mean"].map(lambda v: f"{v:.4f}"),
-                title=f"不同個人化微調強度於各分區之測試集 {cur_label} 對比 (溫和微調成功消除 Group 5 退化)",
+                title=f"不同個人化微調強度於各分區之測試集 {cur_label} 對比",
                 color_discrete_sequence=["#10b981", "#38bdf8", "#6366f1", "#4f46e5", "#ef4444"],
             )
             if y_zoom and metric_choice != "loss":
